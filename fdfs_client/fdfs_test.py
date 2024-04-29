@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 # filename: fdfs_test.py
 
-import os, sys, time
+import os
+import sys
+import time
 
 try:
     from fdfs_client.client import *
@@ -96,7 +98,7 @@ def upslavefile_func():
         local_filename = sys.argv[2]
         remote_fileid = sys.argv[3]
         prefix_name = sys.argv[4]
-        ret_dict = client.upload_slave_by_file(local_filename, remote_fileid,
+        ret_dict = client.upload_slave_by_file(local_filename, remote_fileid, \
                                                prefix_name)
         for key in ret_dict:
             print('[+] %s : %s' % (key, ret_dict[key]))
@@ -116,7 +118,7 @@ def upslavebuffer_func():
         prefix_name = sys.argv[4]
         with open(local_filename, 'rb') as f:
             filebuffer = f.read()
-            ret_dict = client.upload_slave_by_buffer(local_filename,
+            ret_dict = client.upload_slave_by_buffer(local_filename, \
                                                      remote_fileid, prefix_name)
         for key in ret_dict:
             print('[+] %s : %s' % (key, ret_dict[key]))
@@ -364,7 +366,7 @@ def truncate_func():
     if len(sys.argv) < 4:
         usage()
         return None
-    truncate_filesize = sys.argv[2]
+    truncate_filesize = int(sys.argv[2])
     remote_fileid = sys.argv[3]
     try:
         ret_dict = client.truncate_file(truncate_filesize, remote_fileid)
@@ -383,7 +385,7 @@ def modifyfile_func():
     local_filename = sys.argv[2]
     remote_fileid = sys.argv[3]
     if len(sys.argv) > 4:
-        file_offset = sys.argv[4]
+        file_offset = int(sys.argv[4])
     else:
         file_offset = 0
     try:
@@ -403,7 +405,7 @@ def modifybuffer_func():
     local_filename = sys.argv[2]
     remote_fileid = sys.argv[3]
     if len(sys.argv) > 4:
-        file_offset = sys.argv[4]
+        file_offset = int(sys.argv[4])
     else:
         file_offset = 0
     try:

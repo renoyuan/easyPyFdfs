@@ -1,24 +1,25 @@
 #!/usr/bin/env python
 # -*- coding = utf-8 -*-
 # filename: utils.py
-from configparser import DEFAULTSECT, MissingSectionHeaderError, ParsingError, RawConfigParser, \
-    NoSectionError
-import os
-import stat
-from mutagen._compat import StringIO
 
-from requests.compat import basestring
+import io
+import os
+import sys
+import stat
+import platform
+import configparser
 
 SUFFIX = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
+__os_sep__ = "/" if platform.system() == 'Windows' else os.sep
 
 
 def appromix(size, base=0):
-    """Conver bytes stream size to human-readable format.
+    '''Conver bytes stream size to human-readable format.
     Keyword arguments:
     size: int, bytes stream size
     base: int, suffix index
     Return: string
-    """
+    '''
     multiples = 1024
     if size < 0:
         raise ValueError('[-] Error: number must be non-negative.')
@@ -27,7 +28,7 @@ def appromix(size, base=0):
     for suffix in SUFFIX[base:]:
         if size < multiples:
             return '{0:.2f}{1}'.format(size, suffix)
-        size //= multiples
+        size = size / float(multiples)
     raise ValueError('[-] Error: number too big.')
 
 
@@ -36,16 +37,16 @@ def get_file_ext_name(filename, double_ext=True):
     if len(li) <= 1:
         return ''
     else:
-        if li[-1].find(os.sep) != -1:
+        if li[-1].find(__os_sep__) != -1:
             return ''
     if double_ext:
         if len(li) > 2:
-            if li[-2].find(os.sep) == -1:
+            if li[-2].find(__os_sep__) == -1:
                 return '%s.%s' % (li[-2], li[-1])
     return li[-1]
 
 
-class Fdfs_ConfigParser(RawConfigParser):
+class Fdfs_ConfigParser(configparser.RawConfigParser):
     """ 
     Extends ConfigParser to allow files without sections. 
  
@@ -54,7 +55,7 @@ class Fdfs_ConfigParser(RawConfigParser):
     """
 
     def __init__(self, default_section=None, *args, **kwargs):
-        RawConfigParser.__init__(self, *args, **kwargs)
+        configparser.RawConfigParser.__init__(self, *args, **kwargs)
 
         self._default_section = None
         self.set_default_section(default_section or '__config__')
@@ -69,7 +70,7 @@ class Fdfs_ConfigParser(RawConfigParser):
         try:
             default_section_items = self.items(self._default_section)
             self.remove_section(self._default_section)
-        except NoSectionError:
+        except configparser.NoSectionError:
             pass
         else:
             for (key, value) in default_section_items:
@@ -78,7 +79,7 @@ class Fdfs_ConfigParser(RawConfigParser):
         self._default_section = section
 
     def read(self, filenames):
-        if isinstance(filenames, basestring):
+        if isinstance(filenames, str):
             filenames = [filenames]
 
         read_ok = []
@@ -86,7 +87,7 @@ class Fdfs_ConfigParser(RawConfigParser):
             try:
                 with open(filename) as fp:
                     self.readfp(fp)
-            except IOError as e:
+            except IOError:
                 continue
             else:
                 read_ok.append(filename)
@@ -94,11 +95,11 @@ class Fdfs_ConfigParser(RawConfigParser):
         return read_ok
 
     def readfp(self, fp, *args, **kwargs):
-        stream = StringIO()
+        stream = io.StringIO()
 
         try:
             stream.name = fp.name
-        except AttributeError as e:
+        except AttributeError:
             pass
 
         stream.write('[' + self._default_section + ']\n')
@@ -118,10 +119,10 @@ class Fdfs_ConfigParser(RawConfigParser):
                 fp.write("{0} = {1}\n".format(key, value))
 
             fp.write("\n")
-        except NoSectionError:
+        except configparser.NoSectionError:
             pass
 
-        RawConfigParser.write(self, fp)
+        configparser.RawConfigParser.write(self, fp)
 
         self.add_section(self._default_section)
         for (key, value) in default_section_items:
@@ -145,7 +146,7 @@ class Fdfs_ConfigParser(RawConfigParser):
             line = fp.readline()
             if not line:
                 break
-            lineno += 1
+            lineno = lineno + 1
             # comment or blank line?
             if line.strip() == '' or line[0] in '#;':
                 continue
@@ -192,7 +193,7 @@ class Fdfs_ConfigParser(RawConfigParser):
                         if optval == '""':
                             optval = ''
                         optname = self.optionxform(optname.rstrip())
-                        if cursect.get(optname):
+                        if optname in cursect:
                             if not isinstance(cursect[optname], list):
                                 cursect[optname] = [cursect[optname]]
                             cursect[optname].append(optval)
@@ -212,16 +213,16 @@ class Fdfs_ConfigParser(RawConfigParser):
 
 
 def split_remote_fileid(remote_file_id):
-    """
+    '''
     Splite remote_file_id to (group_name, remote_file_name)
     arguments:
     @remote_file_id: string
     @return tuple, (group_name, remote_file_name)
-    """
-    index = remote_file_id.find('/')
+    '''
+    index = remote_file_id.find(b'/')
     if -1 == index:
         return None
-    return remote_file_id[0:index], remote_file_id[(index + 1):]
+    return (remote_file_id[0:index], remote_file_id[(index + 1):])
 
 
 def fdfs_check_file(filename):
@@ -233,7 +234,7 @@ def fdfs_check_file(filename):
     elif not stat.S_ISREG(os.stat(filename).st_mode):
         ret = False
         errmsg = '[-] Error: %s is not a regular file.' % filename
-    return ret, errmsg
+    return (ret, errmsg)
 
 
 if __name__ == '__main__':

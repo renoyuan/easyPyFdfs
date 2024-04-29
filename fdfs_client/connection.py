@@ -16,9 +16,10 @@ from fdfs_client.exceptions import (
     DataError
 )
 
+
 # start class Connection
 class Connection(object):
-    """Manage TCP comunication to and from Fastdfs Server."""
+    '''Manage TCP comunication to and from Fastdfs Server.'''
 
     def __init__(self, **conn_kwargs):
         self.pid = os.getpid()
@@ -35,7 +36,7 @@ class Connection(object):
             pass
 
     def connect(self):
-        """Connect to fdfs server."""
+        '''Connect to fdfs server.'''
         if self._sock:
             return
         try:
@@ -43,21 +44,21 @@ class Connection(object):
         except socket.error as e:
             raise ConnectionError(self._errormessage(e))
         self._sock = sock
-        #print '[+] Create a connection success.'
-        #print '\tLocal address is %s:%s.' % self._sock.getsockname()
-        #print '\tRemote address is %s:%s' % (self.remote_addr, self.remote_port)
-        
+        # print '[+] Create a connection success.'
+        # print '\tLocal address is %s:%s.' % self._sock.getsockname()
+        # print '\tRemote address is %s:%s' % (self.remote_addr, self.remote_port)
+
     def _connect(self):
         '''Create TCP socket. The host is random one of host_tuple.'''
         self.remote_addr = random.choice(self.host_tuple)
-        #print '[+] Connecting... remote: %s:%s' % (self.remote_addr, self.remote_port)
-        #sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        #sock.settimeout(self.timeout)
-        sock = socket.create_connection((self.remote_addr, self.remote_port),self.timeout)
+        # print '[+] Connecting... remote: %s:%s' % (self.remote_addr, self.remote_port)
+        # sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # sock.settimeout(self.timeout)
+        sock = socket.create_connection((self.remote_addr, self.remote_port), self.timeout)
         return sock
 
     def disconnect(self):
-        """Disconnect from fdfs server."""
+        '''Disconnect from fdfs server.'''
         if self._sock is None:
             return
         try:
@@ -71,10 +72,9 @@ class Connection(object):
 
     def _errormessage(self, exception):
         # args for socket.error can either be (errno, "message")
-        # or just "message" """
+        # or just "message" '''
         if len(exception.args) == 1:
-            return "[-] Error: connect to %s:%s. %s." % \
-                   (self.remote_addr, self.remote_port, exception.args[0])
+            return "[-] Error: connect to %s:%s. %s." % (self.remote_addr, self.remote_port, exception.args[0])
         else:
             return "[-] Error: %s connect to %s:%s. %s." % \
                    (exception.args[0], self.remote_addr, self.remote_port, exception.args[1])
@@ -84,7 +84,7 @@ class Connection(object):
 
 # start ConnectionPool
 class ConnectionPool(object):
-    """Generic Connection Pool"""
+    '''Generic Connection Pool'''
 
     def __init__(self, name='', conn_class=Connection,
                  max_conn=None, **conn_kwargs):
@@ -101,18 +101,19 @@ class ConnectionPool(object):
     def _check_pid(self):
         if self.pid != os.getpid():
             self.destroy()
-            self.__init__(self.pool_name, self.conn_class, self.max_conn, **self.conn_kwargs)
+            self.__init__(self.conn_class, self.max_conn, **self.conn_kwargs)
 
     def make_conn(self):
-        """Create a new connection."""
+        '''Create a new connection.'''
         if self._conns_created >= self.max_conn:
             raise ConnectionError('[-] Error: Too many connections.')
-        num_try = 3
+        num_try = 10
         while True:
             try:
                 if num_try <= 0:
-                    break
-                conn_instance = self.conn_class(**self.conn_kwargs)
+                    sys.exit()
+                # conn_instance = self.conn_class(**self.conn_kwargs)
+                conn_instance = Connection(**self.conn_kwargs)
                 conn_instance.connect()
                 self._conns_created += 1
                 break
@@ -120,12 +121,10 @@ class ConnectionPool(object):
                 print(e)
                 num_try -= 1
                 conn_instance = None
-        if num_try <= 0:
-            raise ConnectionError("Fail to connect with Fdfs-server after trying 3 times")
         return conn_instance
 
     def get_connection(self):
-        """Get a connection from pool."""
+        '''Get a connection from pool.'''
         self._check_pid()
         try:
             conn = self._conns_available.pop()
@@ -138,7 +137,7 @@ class ConnectionPool(object):
         return conn
 
     def remove(self, conn):
-        """Remove connection from pool."""
+        '''Remove connection from pool.'''
         if conn in self._conns_inuse:
             self._conns_inuse.remove(conn)
             self._conns_created -= 1
@@ -147,14 +146,14 @@ class ConnectionPool(object):
             self._conns_created -= 1
 
     def destroy(self):
-        """Disconnect all connections in the pool."""
+        '''Disconnect all connections in the pool.'''
         all_conns = chain(self._conns_inuse, self._conns_available)
         for conn in all_conns:
             conn.disconnect()
             # print '[-] Destroy connection pool %s.' % self.pool_name
 
     def release(self, conn):
-        """Release the connection back to the pool."""
+        '''Release the connection back to the pool.'''
         self._check_pid()
         if conn.pid == self.pid:
             self._conns_inuse.remove(conn)
@@ -164,7 +163,7 @@ class ConnectionPool(object):
 
 # end ConnectionPool class
 
-def tcp_recv_response(conn, bytes_size, buffer_size = 1024):
+def tcp_recv_response(conn, bytes_size, buffer_size=4096):
     '''Receive response from server.
         It is not include tracker header.
         arguments:
@@ -173,35 +172,28 @@ def tcp_recv_response(conn, bytes_size, buffer_size = 1024):
         @buffer_size: int, receive buffer size
         @Return: tuple,(response, received_size)
     '''
-    response = ''
+    recv_buff = []
     total_size = 0
-    total_bytes_size = bytes_size
     try:
-        while 1:
-            if total_bytes_size - total_size <= buffer_size:
-                resp = conn._sock.recv(buffer_size)
-                response += resp
-                total_size += len(resp)
-                break
+        while bytes_size > 0:
             resp = conn._sock.recv(buffer_size)
-            response += resp
+            recv_buff.append(resp)
             total_size += len(resp)
-            
+            bytes_size -= len(resp)
     except (socket.error, socket.timeout) as e:
-            raise ConnectionError('[-] Error: while reading from socket: (%s)' \
-                                    % e.args)
-    return (response, total_size)
+        raise ConnectionError('[-] Error: while reading from socket: (%s)' % e.args)
+    return (b''.join(recv_buff), total_size)
+
 
 def tcp_send_data(conn, bytes_stream):
-    """Send buffer to server.
+    '''Send buffer to server.
         It is not include tracker header.
         arguments:
         @conn: connection
         @bytes_stream: trasmit buffer
         @Return bool
-    """
+    '''
     try:
         conn._sock.sendall(bytes_stream)
     except (socket.error, socket.timeout) as e:
-        raise ConnectionError('[-] Error: while writting to socket: (%s)' \
-                              % e.args)
+        raise ConnectionError('[-] Error: while writting to socket: (%s)' % e.args)

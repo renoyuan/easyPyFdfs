@@ -2,14 +2,17 @@
 # -*- coding: utf-8 -*-
 # filename: storage_client.py
 
-import os, stat
+import os
+import stat
+import errno
 import struct
 import socket
 import datetime
-import errno
+import platform
+
 from fdfs_client.fdfs_protol import *
 from fdfs_client.connection import *
-from fdfs_client.sendfile import *
+# from test_fdfs.sendfile import *
 from fdfs_client.exceptions import (
     FDFSError,
     ConnectionError,
@@ -18,6 +21,8 @@ from fdfs_client.exceptions import (
     DataError
 )
 from fdfs_client.utils import *
+
+__os_sep__ = "/" if platform.system() == 'Windows' else os.sep
 
 
 def tcp_send_file(conn, filename, buffer_size=1024):
@@ -63,11 +68,12 @@ def tcp_send_file_ex(conn, filename, buffer_size=4096):
         in_fd = f.fileno()
         while 1:
             try:
-                sent = sendfile(sock_fd, in_fd, offset, buffer_size)
-                if 0 == sent:
-                    break
-                nbytes += sent
-                offset += sent
+                pass
+                # sent = sendfile(sock_fd, in_fd, offset, buffer_size)
+                # if 0 == sent:
+                #     break
+                # nbytes += sent
+                # offset += sent
             except OSError as e:
                 if e.errno == errno.EAGAIN:
                     continue
@@ -89,17 +95,14 @@ def tcp_recv_file(conn, local_filename, file_size, buffer_size=1024):
     flush_size = 0
     remain_bytes = file_size
     with open(local_filename, 'wb+') as f:
-        diff_size = remain_bytes
-        while diff_size > buffer_size:
-            diff_size = remain_bytes - total_file_size
+        while remain_bytes > 0:
             try:
-                if diff_size >= buffer_size:
-                    file_buffer, recv_size = tcp_recv_response(conn, buffer_size, \
-                                                               buffer_size)
+                if remain_bytes >= buffer_size:
+                    file_buffer, recv_size = tcp_recv_response(conn, buffer_size, buffer_size)
                 else:
-                    file_buffer, recv_size = tcp_recv_response(conn, diff_size, \
-                                                               buffer_size)
+                    file_buffer, recv_size = tcp_recv_response(conn, remain_bytes, buffer_size)
                 f.write(file_buffer)
+                remain_bytes -= buffer_size
                 total_file_size += recv_size
                 flush_size += recv_size
                 if flush_size >= 4096:
@@ -113,15 +116,16 @@ def tcp_recv_file(conn, local_filename, file_size, buffer_size=1024):
 
 
 class Storage_client(object):
-    """
+    '''
     The Class Storage_client for storage server.
     Note: argument host_tuple of storage server ip address, that should be a single element.
-    """
+    '''
 
     def __init__(self, *kwargs):
         conn_kwargs = {
             'name': 'Storage Pool',
-            'host_tuple': ((kwargs[0], kwargs[1]),),
+            'host_tuple': (kwargs[0],),
+            'port': kwargs[1],
             'timeout': kwargs[2]
         }
         self.pool = ConnectionPool(**conn_kwargs)
@@ -145,18 +149,17 @@ class Storage_client(object):
         self.pool.destroy()
         conn_kwargs = {
             'name': 'Storage_pool',
-            'host_tuple': ((new_store_serv.ip_addr, new_store_serv.port),),
+            'host_tuple': (new_store_serv.ip_addr,),
+            'port': new_store_serv.port,
             'timeout': timeout
         }
         self.pool = ConnectionPool(**conn_kwargs)
         return True
 
-
     def _storage_do_upload_file(self, tracker_client, store_serv, file_buffer, file_size=None, upload_type=None,
                                 meta_dict=None, cmd=None, master_filename=None, prefix_name=None, file_ext_name=None):
-        """
+        '''
         core of upload file.
-        :rtype : object
         arguments:
         @tracker_client: Tracker_client, it is useful connect to tracker server
         @store_serv: Storage_server, it is return from query tracker server
@@ -169,7 +172,7 @@ class Storage_client(object):
         @master_filename: string, useful upload slave file
         @prefix_name: string
         @file_ext_name: string
-        @Return dictionary
+        @Return dictionary 
                  {
                      'Group name'      : group_name,
                      'Remote file_id'  : remote_file_id,
@@ -179,13 +182,10 @@ class Storage_client(object):
                      'Storage IP'      : storage_ip
                  }
 
-        """
+        '''
 
-        print('getting connection')
         store_conn = self.pool.get_connection()
-        print(store_conn)
         th = Tracker_header()
-        print(th)
         master_filename_len = len(master_filename) if master_filename else 0
         prefix_name_len = len(prefix_name) if prefix_name else 0
         upload_slave = len(store_serv.group_name) and master_filename_len
@@ -195,14 +195,13 @@ class Storage_client(object):
         # slave_fmt |-master_len(8)-file_size(8)-prefix_name(16)-file_ext_name(6)
         #           -master_name(master_filename_len)-|
         slave_fmt = '!Q Q %ds %ds %ds' % (FDFS_FILE_PREFIX_MAX_LEN, FDFS_FILE_EXT_NAME_MAX_LEN, master_filename_len)
-        th.pkg_len = struct.calcsize(slave_fmt) if upload_slave \
-            else struct.calcsize(non_slave_fmt)
+        th.pkg_len = struct.calcsize(slave_fmt) if upload_slave else struct.calcsize(non_slave_fmt)
         th.pkg_len += file_size
         th.cmd = cmd
         th.send_header(store_conn)
         if upload_slave:
-            send_buffer = struct.pack(slave_fmt, master_filename_len, file_size, prefix_name, file_ext_name,
-                                      master_filename)
+            send_buffer = struct.pack(
+                slave_fmt, master_filename_len, file_size, prefix_name, file_ext_name, master_filename)
         else:
             send_buffer = struct.pack(non_slave_fmt, store_serv.store_path_index, file_size, file_ext_name.encode())
         try:
@@ -222,10 +221,9 @@ class Storage_client(object):
                 errmsg += 'expect: %d, actual: %d' % (th.pkg_len, recv_size)
                 raise ResponseError(errmsg)
             # recv_fmt: |-group_name(16)-remote_file_name(recv_size - 16)-|
-            recv_fmt = '!%ds %ds' % (FDFS_GROUP_NAME_MAX_LEN, \
-                                     th.pkg_len - FDFS_GROUP_NAME_MAX_LEN)
+            recv_fmt = '!%ds %ds' % (FDFS_GROUP_NAME_MAX_LEN, th.pkg_len - FDFS_GROUP_NAME_MAX_LEN)
             (group_name, remote_name) = struct.unpack(recv_fmt, recv_buffer)
-            remote_filename = remote_name.strip(b'\x00').decode()
+            remote_filename = remote_name.strip(b'\x00')
             if meta_dict and len(meta_dict) > 0:
                 status = self.storage_set_metadata(tracker_client, store_serv, remote_filename, meta_dict)
                 if status != 0:
@@ -237,101 +235,79 @@ class Storage_client(object):
         finally:
             self.pool.release(store_conn)
         ret_dic = {
-            'Group name': group_name.strip(b'\x00').decode(),
-            'Remote file_id': group_name.strip(b'\x00').decode() + os.sep + \
-                              remote_filename,
+            'Group name': group_name.strip(b'\x00'),
+            'Remote file_id': group_name.strip(b'\x00') + __os_sep__.encode() + remote_filename,
             'Status': 'Upload successed.',
-            'Local file name': file_buffer if (
-                upload_type == FDFS_UPLOAD_BY_FILENAME or upload_type == FDFS_UPLOAD_BY_FILE) \
-                else '',
-            'Uploaded size': appromix(send_file_size) if (
-                upload_type == FDFS_UPLOAD_BY_FILENAME or upload_type == FDFS_UPLOAD_BY_FILE) else appromix(
-                len(file_buffer)),
+            'Local file name': file_buffer if (upload_type == FDFS_UPLOAD_BY_FILENAME
+                                               or upload_type == FDFS_UPLOAD_BY_FILE
+                                               ) else '',
+            'Uploaded size': appromix(send_file_size) if (upload_type == FDFS_UPLOAD_BY_FILENAME
+                                                          or upload_type == FDFS_UPLOAD_BY_FILE
+                                                          ) else appromix(len(file_buffer)),
             'Storage IP': store_serv.ip_addr
         }
         return ret_dic
 
-    def storage_upload_by_filename(self, tracker_client, store_serv, filename, \
-                                   meta_dict=None):
+    def storage_upload_by_filename(self, tracker_client, store_serv, filename, meta_dict=None):
         file_size = os.stat(filename).st_size
         file_ext_name = get_file_ext_name(filename)
-        return self._storage_do_upload_file(tracker_client, store_serv, filename,
-                                            file_size, FDFS_UPLOAD_BY_FILENAME, meta_dict,
-                                            STORAGE_PROTO_CMD_UPLOAD_FILE, None,
-                                            None, file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, filename, file_size, FDFS_UPLOAD_BY_FILENAME,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_FILE, None, None, file_ext_name)
 
-    def storage_upload_by_file(self, tracker_client, store_serv, filename,
-                               meta_dict=None):
+    def storage_upload_by_file(self, tracker_client, store_serv, filename, meta_dict=None):
         file_size = os.stat(filename).st_size
         file_ext_name = get_file_ext_name(filename)
-        return self._storage_do_upload_file(tracker_client, store_serv, filename,
-                                            file_size, FDFS_UPLOAD_BY_FILE, meta_dict,
-                                            STORAGE_PROTO_CMD_UPLOAD_FILE, None,
-                                            None, file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, filename, file_size, FDFS_UPLOAD_BY_FILE,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_FILE, None, None, file_ext_name)
 
-    def storage_upload_by_buffer(self, tracker_client, store_serv,
-                                 file_buffer, file_ext_name=None, meta_dict=None):
+    def storage_upload_by_buffer(self, tracker_client, store_serv, file_buffer, file_ext_name=None, meta_dict=None):
         buffer_size = len(file_buffer)
-        return self._storage_do_upload_file(tracker_client, store_serv, file_buffer, \
-                                            buffer_size, FDFS_UPLOAD_BY_BUFFER, meta_dict, \
-                                            STORAGE_PROTO_CMD_UPLOAD_FILE, None, \
-                                            None, file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, file_buffer, buffer_size, FDFS_UPLOAD_BY_BUFFER,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_FILE, None, None, file_ext_name)
 
-    def storage_upload_slave_by_filename(self, tracker_client, store_serv, \
-                                         filename, prefix_name, remote_filename, \
+    def storage_upload_slave_by_filename(self, tracker_client, store_serv, filename, prefix_name, remote_filename,
                                          meta_dict=None):
         file_size = os.stat(filename).st_size
         file_ext_name = get_file_ext_name(filename)
-        return self._storage_do_upload_file(tracker_client, store_serv, filename, \
-                                            file_size, FDFS_UPLOAD_BY_FILENAME, meta_dict, \
-                                            STORAGE_PROTO_CMD_UPLOAD_SLAVE_FILE, \
-                                            remote_filename, prefix_name, \
-                                            file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, filename, file_size, FDFS_UPLOAD_BY_FILENAME,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_SLAVE_FILE, remote_filename,
+                                            prefix_name, file_ext_name)
 
-    def storage_upload_slave_by_file(self, tracker_client, store_serv, \
-                                     filename, prefix_name, remote_filename, \
+    def storage_upload_slave_by_file(self, tracker_client, store_serv, filename, prefix_name, remote_filename,
                                      meta_dict=None):
         file_size = os.stat(filename).st_size
         file_ext_name = get_file_ext_name(filename)
-        return self._storage_do_upload_file(tracker_client, store_serv, filename,
-                                            file_size, FDFS_UPLOAD_BY_FILE, meta_dict,
-                                            STORAGE_PROTO_CMD_UPLOAD_SLAVE_FILE,
-                                            remote_filename, prefix_name,
-                                            file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, filename, file_size, FDFS_UPLOAD_BY_FILE,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_SLAVE_FILE, remote_filename,
+                                            prefix_name, file_ext_name)
 
-    def storage_upload_slave_by_buffer(self, tracker_client, store_serv,
-                                       filebuffer, remote_filename, meta_dict,
+    def storage_upload_slave_by_buffer(self, tracker_client, store_serv, filebuffer, remote_filename, meta_dict,
                                        file_ext_name):
         file_size = len(filebuffer)
-        return self._storage_do_upload_file(tracker_client, store_serv,
-                                            filebuffer, file_size, FDFS_UPLOAD_BY_BUFFER,
-                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_SLAVE_FILE,
-                                            None, remote_filename, file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, filebuffer, file_size, FDFS_UPLOAD_BY_BUFFER,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_SLAVE_FILE, None, remote_filename,
+                                            file_ext_name)
 
-    def storage_upload_appender_by_filename(self, tracker_client, store_serv,
-                                            filename, meta_dict=None):
+    def storage_upload_appender_by_filename(self, tracker_client, store_serv, filename, meta_dict=None):
         file_size = os.stat(filename).st_size
         file_ext_name = get_file_ext_name(filename)
-        return self._storage_do_upload_file(tracker_client, store_serv, filename,
-                                            file_size, FDFS_UPLOAD_BY_FILENAME, meta_dict,
-                                            STORAGE_PROTO_CMD_UPLOAD_APPENDER_FILE,
-                                            None, None, file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, filename, file_size, FDFS_UPLOAD_BY_FILENAME,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_APPENDER_FILE, None, None,
+                                            file_ext_name)
 
     def storage_upload_appender_by_file(self, tracker_client, store_serv, filename, meta_dict=None):
         file_size = os.stat(filename).st_size
         file_ext_name = get_file_ext_name(filename)
         return self._storage_do_upload_file(tracker_client, store_serv, filename, file_size, FDFS_UPLOAD_BY_FILE,
-                                            meta_dict,
-                                            STORAGE_PROTO_CMD_UPLOAD_APPENDER_FILE, None, None, file_ext_name)
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_APPENDER_FILE, None, None,
+                                            file_ext_name)
 
-    def storage_upload_appender_by_buffer(self, tracker_client, store_serv,
-                                          file_buffer, meta_dict=None,
+    def storage_upload_appender_by_buffer(self, tracker_client, store_serv, file_buffer, meta_dict=None,
                                           file_ext_name=None):
         file_size = len(file_buffer)
-        return self._storage_do_upload_file(tracker_client, store_serv, file_buffer, \
-                                            file_size, FDFS_UPLOAD_BY_BUFFER, meta_dict, \
-                                            STORAGE_PROTO_CMD_UPLOAD_APPENDER_FILE, \
-                                            None, None, file_ext_name)
+        return self._storage_do_upload_file(tracker_client, store_serv, file_buffer, file_size, FDFS_UPLOAD_BY_BUFFER,
+                                            meta_dict, STORAGE_PROTO_CMD_UPLOAD_APPENDER_FILE, None, None,
+                                            file_ext_name)
 
     def storage_delete_file(self, tracker_client, store_serv, remote_filename):
         '''
@@ -346,12 +322,12 @@ class Storage_client(object):
             th.send_header(store_conn)
             # del_fmt: |-group_name(16)-filename(len)-|
             del_fmt = '!%ds %ds' % (FDFS_GROUP_NAME_MAX_LEN, file_name_len)
-            send_buffer = struct.pack(del_fmt, store_serv.group_name.encode(), remote_filename.encode())
+            send_buffer = struct.pack(del_fmt, store_serv.group_name, remote_filename)
             tcp_send_data(store_conn, send_buffer)
             th.recv_header(store_conn)
             # if th.status == 2:
-            #    raise DataError('[-] Error: remote file %s is not exist.' \
-            #                    % (store_serv.group_name + os.sep + remote_filename))
+            #    raise DataError('[-] Error: remote file %s is not exist.'
+            #                    % (store_serv.group_name + __os_sep__.encode() + remote_filename))
             if th.status != 0:
                 raise DataError('Error: %d, %s' % (th.status, os.strerror(th.status)))
                 # recv_buffer, recv_size = tcp_recv_response(store_conn, th.pkg_len)
@@ -359,11 +335,11 @@ class Storage_client(object):
             raise
         finally:
             self.pool.release(store_conn)
-        remote_filename = store_serv.group_name + os.sep + remote_filename
+        remote_filename = store_serv.group_name + __os_sep__.encode() + remote_filename
         return ('Delete file successed.', remote_filename, store_serv.ip_addr)
 
-    def _storage_do_download_file(self, tracker_client, store_serv, file_buffer, \
-                                  offset, download_size, download_type, remote_filename):
+    def _storage_do_download_file(self, tracker_client, store_serv, file_buffer, offset, download_size,
+                                  download_type, remote_filename):
         '''
         Core of download file from storage server.
         You can choice download type, optional FDFS_DOWNLOAD_TO_FILE or 
@@ -377,20 +353,18 @@ class Storage_client(object):
         store_conn = self.pool.get_connection()
         th = Tracker_header()
         remote_filename_len = len(remote_filename)
-        th.pkg_len = FDFS_PROTO_PKG_LEN_SIZE * 2 + FDFS_GROUP_NAME_MAX_LEN + \
-                     remote_filename_len
+        th.pkg_len = FDFS_PROTO_PKG_LEN_SIZE * 2 + FDFS_GROUP_NAME_MAX_LEN + remote_filename_len
         th.cmd = STORAGE_PROTO_CMD_DOWNLOAD_FILE
         try:
             th.send_header(store_conn)
             # down_fmt: |-offset(8)-download_bytes(8)-group_name(16)-remote_filename(len)-|
             down_fmt = '!Q Q %ds %ds' % (FDFS_GROUP_NAME_MAX_LEN, remote_filename_len)
-            send_buffer = struct.pack(down_fmt, offset, download_size, store_serv.group_name.encode(),
-                                      remote_filename.encode())
+            send_buffer = struct.pack(down_fmt, offset, download_size, store_serv.group_name, remote_filename)
             tcp_send_data(store_conn, send_buffer)
             th.recv_header(store_conn)
             # if th.status == 2:
             #    raise DataError('[-] Error: remote file %s is not exist.' % 
-            #                    (store_serv.group_name + os.sep + remote_filename))
+            #                    (store_serv.group_name + __os_sep__.encode() + remote_filename))
             if th.status != 0:
                 raise DataError('Error: %d %s' % (th.status, os.strerror(th.status)))
             if download_type == FDFS_DOWNLOAD_TO_FILE:
@@ -402,18 +376,16 @@ class Storage_client(object):
         finally:
             self.pool.release(store_conn)
         ret_dic = {
-            'Remote file_id': store_serv.group_name + os.sep + remote_filename,
-            'Content': file_buffer if download_type == \
-                                      FDFS_DOWNLOAD_TO_FILE else recv_buffer,
+            'Remote file_id': store_serv.group_name + __os_sep__.encode() + remote_filename,
+            'Content': file_buffer if download_type == FDFS_DOWNLOAD_TO_FILE else recv_buffer,
             'Download size': appromix(total_recv_size),
             'Storage IP': store_serv.ip_addr
         }
         return ret_dic
 
-    def storage_download_to_file(self, tracker_client, store_serv, local_filename, \
-                                 file_offset, download_bytes, remote_filename):
-        return self._storage_do_download_file(tracker_client, store_serv, local_filename, \
-                                              file_offset, download_bytes, \
+    def storage_download_to_file(self, tracker_client, store_serv, local_filename, file_offset, download_bytes,
+                                 remote_filename):
+        return self._storage_do_download_file(tracker_client, store_serv, local_filename, file_offset, download_bytes,
                                               FDFS_DOWNLOAD_TO_FILE, remote_filename)
 
     def storage_download_to_buffer(self, tracker_client, store_serv, file_buffer, file_offset, download_bytes,
@@ -429,16 +401,15 @@ class Storage_client(object):
         meta_buffer = fdfs_pack_metadata(meta_dict)
         meta_len = len(meta_buffer)
         th = Tracker_header()
-        th.pkg_len = FDFS_PROTO_PKG_LEN_SIZE * 2 + 1 + \
-                     FDFS_GROUP_NAME_MAX_LEN + remote_filename_len + meta_len
+        th.pkg_len = FDFS_PROTO_PKG_LEN_SIZE * 2 + 1 + FDFS_GROUP_NAME_MAX_LEN + remote_filename_len + meta_len
         th.cmd = STORAGE_PROTO_CMD_SET_METADATA
         try:
             th.send_header(conn)
             # meta_fmt: |-filename_len(8)-meta_len(8)-op_flag(1)-group_name(16)
             #           -filename(remote_filename_len)-meta(meta_len)|
             meta_fmt = '!Q Q c %ds %ds %ds' % (FDFS_GROUP_NAME_MAX_LEN, remote_filename_len, meta_len)
-            send_buffer = struct.pack(meta_fmt, remote_filename_len, meta_len, op_flag, store_serv.group_name.encode(),
-                                      remote_filename.encode(), meta_buffer)
+            send_buffer = struct.pack(meta_fmt, remote_filename_len, meta_len, op_flag, store_serv.group_name,
+                                      remote_filename, meta_buffer)
             tcp_send_data(conn, send_buffer)
             th.recv_header(conn)
             if th.status != 0:
@@ -459,12 +430,12 @@ class Storage_client(object):
             th.send_header(store_conn)
             # meta_fmt: |-group_name(16)-filename(remote_filename_len)-|
             meta_fmt = '!%ds %ds' % (FDFS_GROUP_NAME_MAX_LEN, remote_filename_len)
-            send_buffer = struct.pack(meta_fmt, store_serv.group_name.encode(), remote_file_name.encode())
+            send_buffer = struct.pack(meta_fmt, store_serv.group_name, remote_file_name.encode())
             tcp_send_data(store_conn, send_buffer)
             th.recv_header(store_conn)
             # if th.status == 2:
-            #    raise DataError('[-] Error: Remote file %s has no meta data.' \
-            #                    % (store_serv.group_name + os.sep + remote_file_name))
+            #    raise DataError('[-] Error: Remote file %s has no meta data.'
+            #                    % (store_serv.group_name + __os_sep__.encode() + remote_file_name))
             if th.status != 0:
                 raise DataError('[-] Error:%d, %s' % (th.status, os.strerror(th.status)))
             if th.pkg_len == 0:
@@ -477,8 +448,8 @@ class Storage_client(object):
         ret_dict = fdfs_unpack_metadata(meta_buffer)
         return ret_dict
 
-    def _storage_do_append_file(self, tracker_client, store_serv, file_buffer, \
-                                file_size, upload_type, appended_filename):
+    def _storage_do_append_file(self, tracker_client, store_serv, file_buffer, file_size, upload_type,
+                                appended_filename):
         store_conn = self.pool.get_connection()
         th = Tracker_header()
         appended_filename_len = len(appended_filename)
@@ -489,7 +460,7 @@ class Storage_client(object):
             # append_fmt: |-appended_filename_len(8)-file_size(8)-appended_filename(len)
             #             -filecontent(filesize)-|
             append_fmt = '!Q Q %ds' % appended_filename_len
-            send_buffer = struct.pack(append_fmt, appended_filename_len, file_size, appended_filename.encode())
+            send_buffer = struct.pack(append_fmt, appended_filename_len, file_size, appended_filename)
             tcp_send_data(store_conn, send_buffer)
             if upload_type == FDFS_UPLOAD_BY_FILENAME:
                 tcp_send_file(store_conn, file_buffer)
@@ -504,34 +475,29 @@ class Storage_client(object):
             raise
         finally:
             self.pool.release(store_conn)
-        ret_dict = {'Status': 'Append file successed.',
-                    'Appender file name': store_serv.group_name + os.sep + appended_filename,
-                    'Appended size': appromix(file_size), 'Storage IP': store_serv.ip_addr}
+        ret_dict = {}
+        ret_dict['Status'] = 'Append file successed.'
+        ret_dict['Appender file name'] = store_serv.group_name + __os_sep__.encode() + appended_filename
+        ret_dict['Appended size'] = appromix(file_size)
+        ret_dict['Storage IP'] = store_serv.ip_addr
         return ret_dict
 
-    def storage_append_by_filename(self, tracker_client, store_serv, \
-                                   local_filename, appended_filename):
+    def storage_append_by_filename(self, tracker_client, store_serv, local_filename, appended_filename):
         file_size = os.stat(local_filename).st_size
-        return self._storage_do_append_file(tracker_client, store_serv, \
-                                            local_filename, file_size, \
+        return self._storage_do_append_file(tracker_client, store_serv, local_filename, file_size,
                                             FDFS_UPLOAD_BY_FILENAME, appended_filename)
 
-    def storage_append_by_file(self, tracker_client, store_serv, \
-                               local_filename, appended_filename):
+    def storage_append_by_file(self, tracker_client, store_serv, local_filename, appended_filename):
         file_size = os.stat(local_filename).st_size
-        return self._storage_do_append_file(tracker_client, store_serv, \
-                                            local_filename, file_size, \
-                                            FDFS_UPLOAD_BY_FILE, appended_filename)
+        return self._storage_do_append_file(tracker_client, store_serv, local_filename, file_size, FDFS_UPLOAD_BY_FILE,
+                                            appended_filename)
 
-    def storage_append_by_buffer(self, tracker_client, store_serv,
-                                 file_buffer, appended_filename):
+    def storage_append_by_buffer(self, tracker_client, store_serv, file_buffer, appended_filename):
         file_size = len(file_buffer)
-        return self._storage_do_append_file(tracker_client, store_serv,
-                                            file_buffer, file_size,
-                                            FDFS_UPLOAD_BY_BUFFER, appended_filename)
+        return self._storage_do_append_file(tracker_client, store_serv, file_buffer, file_size, FDFS_UPLOAD_BY_BUFFER,
+                                            appended_filename)
 
-    def _storage_do_truncate_file(self, tracker_client, store_serv,
-                                  truncated_filesize, appender_filename):
+    def _storage_do_truncate_file(self, tracker_client, store_serv, truncated_filesize, appender_filename):
         store_conn = self.pool.get_connection()
         th = Tracker_header()
         th.cmd = STORAGE_PROTO_CMD_TRUNCATE_FILE
@@ -542,8 +508,7 @@ class Storage_client(object):
             # truncate_fmt:|-appender_filename_len(8)-truncate_filesize(8)
             #              -appender_filename(len)-|
             truncate_fmt = '!Q Q %ds' % appender_filename_len
-            send_buffer = struct.pack(truncate_fmt, appender_filename_len, truncated_filesize,
-                                      appender_filename.encode())
+            send_buffer = struct.pack(truncate_fmt, appender_filename_len, truncated_filesize, appender_filename)
             tcp_send_data(store_conn, send_buffer)
             th.recv_header(store_conn)
             if th.status != 0:
@@ -557,13 +522,11 @@ class Storage_client(object):
         ret_dict['Storage IP'] = store_serv.ip_addr
         return ret_dict
 
-    def storage_truncate_file(self, tracker_client, store_serv, \
-                              truncated_filesize, appender_filename):
-        return self._storage_do_truncate_file(tracker_client, store_serv, \
-                                              truncated_filesize, appender_filename)
+    def storage_truncate_file(self, tracker_client, store_serv, truncated_filesize, appender_filename):
+        return self._storage_do_truncate_file(tracker_client, store_serv, truncated_filesize, appender_filename)
 
-    def _storage_do_modify_file(self, tracker_client, store_serv, upload_type, \
-                                filebuffer, offset, filesize, appender_filename):
+    def _storage_do_modify_file(self, tracker_client, store_serv, upload_type, filebuffer, offset, filesize,
+                                appender_filename):
         store_conn = self.pool.get_connection()
         th = Tracker_header()
         th.cmd = STORAGE_PROTO_CMD_MODIFY_FILE
@@ -573,7 +536,7 @@ class Storage_client(object):
             th.send_header(store_conn)
             # modify_fmt: |-filename_len(8)-offset(8)-filesize(8)-filename(len)-|
             modify_fmt = '!Q Q Q %ds' % appender_filename_len
-            send_buffer = struct.pack(modify_fmt, appender_filename_len, offset, filesize, appender_filename.encode())
+            send_buffer = struct.pack(modify_fmt, appender_filename_len, offset, filesize, appender_filename)
             tcp_send_data(store_conn, send_buffer)
             if upload_type == FDFS_UPLOAD_BY_FILENAME:
                 upload_size = tcp_send_file(store_conn, filebuffer)
@@ -598,13 +561,9 @@ class Storage_client(object):
                                             filesize, appender_filename)
 
     def storage_modify_by_file(self, tracker_client, store_serv, filename, offset, filesize, appender_filename):
-        return self._storage_do_modify_file(tracker_client, store_serv, \
-                                            FDFS_UPLOAD_BY_FILE, filename, offset, \
-                                            filesize, appender_filename)
+        return self._storage_do_modify_file(tracker_client, store_serv, FDFS_UPLOAD_BY_FILE, filename, offset, filesize,
+                                            appender_filename)
 
-    def storage_modify_by_buffer(self, tracker_client, store_serv, \
-                                 filebuffer, offset, \
-                                 filesize, appender_filename):
-        return self._storage_do_modify_file(tracker_client, store_serv, \
-                                            FDFS_UPLOAD_BY_BUFFER, filebuffer, offset, \
+    def storage_modify_by_buffer(self, tracker_client, store_serv, filebuffer, offset, filesize, appender_filename):
+        return self._storage_do_modify_file(tracker_client, store_serv, FDFS_UPLOAD_BY_BUFFER, filebuffer, offset,
                                             filesize, appender_filename)

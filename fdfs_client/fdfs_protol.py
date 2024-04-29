@@ -12,8 +12,7 @@ from fdfs_client.exceptions import (
     DataError
 )
 
-
-## define FDFS protol constans
+# define FDFS protol constans
 TRACKER_PROTO_CMD_STORAGE_JOIN = 81
 FDFS_PROTO_CMD_QUIT = 82
 TRACKER_PROTO_CMD_STORAGE_BEAT = 83  # storage heart beat
@@ -94,11 +93,10 @@ STORAGE_SET_METADATA_FLAG_OVERWRITE_STR = "O"
 STORAGE_SET_METADATA_FLAG_MERGE = 'M'
 STORAGE_SET_METADATA_FLAG_MERGE_STR = "M"
 
-FDFS_RECORD_SEPERATOR = b'\x01'
-FDFS_FIELD_SEPERATOR = b'\x02'
+FDFS_RECORD_SEPERATOR = '\x01'
+FDFS_FIELD_SEPERATOR = '\x02'
 
 # common constants
-FDFS_STORAGE_ID_MAX_SIZE = 16
 FDFS_GROUP_NAME_MAX_LEN = 16
 IP_ADDRESS_SIZE = 16
 FDFS_PROTO_PKG_LEN_SIZE = 8
@@ -127,23 +125,17 @@ FDFS_UPLOAD_BY_FILE = 3
 FDFS_DOWNLOAD_TO_BUFFER = 1
 FDFS_DOWNLOAD_TO_FILE = 2
 
-FDFS_NORMAL_LOGIC_FILENAME_LENGTH = (FDFS_LOGIC_FILE_PATH_LEN + \
-                                     FDFS_FILENAME_BASE64_LENGTH + FDFS_FILE_EXT_NAME_MAX_LEN + 1)
+FDFS_NORMAL_LOGIC_FILENAME_LENGTH = (
+    FDFS_LOGIC_FILE_PATH_LEN + FDFS_FILENAME_BASE64_LENGTH + FDFS_FILE_EXT_NAME_MAX_LEN + 1)
 
-FDFS_TRUNK_FILENAME_LENGTH = (FDFS_TRUE_FILE_PATH_LEN + \
-                              FDFS_FILENAME_BASE64_LENGTH + \
-                              FDFS_TRUNK_FILE_INFO_LEN + \
-                              1 + FDFS_FILE_EXT_NAME_MAX_LEN)
-FDFS_TRUNK_LOGIC_FILENAME_LENGTH = (FDFS_TRUNK_FILENAME_LENGTH + \
-                                    (FDFS_LOGIC_FILE_PATH_LEN - \
-                                     FDFS_TRUE_FILE_PATH_LEN))
+FDFS_TRUNK_FILENAME_LENGTH = (
+    FDFS_TRUE_FILE_PATH_LEN + FDFS_FILENAME_BASE64_LENGTH + FDFS_TRUNK_FILE_INFO_LEN + 1 + FDFS_FILE_EXT_NAME_MAX_LEN)
+FDFS_TRUNK_LOGIC_FILENAME_LENGTH = (FDFS_TRUNK_FILENAME_LENGTH + (FDFS_LOGIC_FILE_PATH_LEN - FDFS_TRUE_FILE_PATH_LEN))
 
 FDFS_VERSION_SIZE = 6
 
-TRACKER_QUERY_STORAGE_FETCH_BODY_LEN = (FDFS_GROUP_NAME_MAX_LEN \
-                                        + IP_ADDRESS_SIZE - 1 + FDFS_PROTO_PKG_LEN_SIZE)
-TRACKER_QUERY_STORAGE_STORE_BODY_LEN = (FDFS_GROUP_NAME_MAX_LEN \
-                                        + IP_ADDRESS_SIZE - 1 + FDFS_PROTO_PKG_LEN_SIZE + 1)
+TRACKER_QUERY_STORAGE_FETCH_BODY_LEN = (FDFS_GROUP_NAME_MAX_LEN + IP_ADDRESS_SIZE - 1 + FDFS_PROTO_PKG_LEN_SIZE)
+TRACKER_QUERY_STORAGE_STORE_BODY_LEN = (FDFS_GROUP_NAME_MAX_LEN + IP_ADDRESS_SIZE - 1 + FDFS_PROTO_PKG_LEN_SIZE + 1)
 # status code, order is important!
 FDFS_STORAGE_STATUS_INIT = 0
 FDFS_STORAGE_STATUS_WAIT_SYNC = 1
@@ -158,7 +150,7 @@ FDFS_STORAGE_STATUS_NONE = 99
 
 
 class Storage_server(object):
-    """Class storage server for upload."""
+    '''Class storage server for upload.'''
 
     def __init__(self):
         self.ip_addr = None
@@ -169,14 +161,14 @@ class Storage_server(object):
 
 # Class tracker_header
 class Tracker_header(object):
-    """
+    '''
     Class for Pack or Unpack tracker header
         struct tracker_header{
             char pkg_len[FDFS_PROTO_PKG_LEN_SIZE],
             char cmd,
             char status,
         }
-    """
+    '''
 
     def __init__(self):
         self.fmt = '!QBB'  # pkg_len[FDFS_PROTO_PKG_LEN_SIZE] + cmd + status
@@ -196,36 +188,31 @@ class Tracker_header(object):
         return self.st.size
 
     def send_header(self, conn):
-        """Send Tracker header to server."""
+        '''Send Tracker header to server.'''
         header = self._pack(self.pkg_len, self.cmd, self.status)
         try:
-            conn.sendall(header)
+            conn._sock.sendall(header)
         except (socket.error, socket.timeout) as e:
-            raise ConnectionError('[-] Error: while writting to socket: %s' \
-                                  % (e.args,))
+            raise ConnectionError('[-] Error: while writting to socket: %s' % (e.args,))
 
     def recv_header(self, conn):
-        """Receive response from server.
+        '''Receive response from server.
            if sucess, class member (pkg_len, cmd, status) is response.
-        """
+        '''
         try:
-            header = conn.recv(self.header_len())
+            header = conn._sock.recv(self.header_len())
         except (socket.error, socket.timeout) as e:
-            raise ConnectionError('[-] Error: while reading from socket: %s' \
-                                  % (e.args,))
-        if not header:
-            raise ConnectionError("Socket closed on remote end")
+            raise ConnectionError('[-] Error: while reading from socket: %s' % (e.args,))
         self._unpack(header)
 
 
 def fdfs_pack_metadata(meta_dict):
-    ret = b''
+    ret = ''
     for key in meta_dict:
-        ret += b'%s%c%s%c' % (key, FDFS_FIELD_SEPERATOR, meta_dict[key], FDFS_RECORD_SEPERATOR)
+        ret += '%s%c%s%c' % (key, FDFS_FIELD_SEPERATOR, meta_dict[key], FDFS_RECORD_SEPERATOR)
     return ret[0:-1]
 
 
 def fdfs_unpack_metadata(bytes_stream):
     li = bytes_stream.split(FDFS_RECORD_SEPERATOR)
-    res = [item.split(FDFS_FIELD_SEPERATOR) for item in li]
-    return map(lambda l: map(lambda ll: ll.decode(), l), res)
+    return dict([item.split(FDFS_FIELD_SEPERATOR) for item in li])
